@@ -3,6 +3,7 @@ import { View, ActivityIndicator } from 'react-native'
 import { supabase } from './lib/supabase'
 import LoginScreen from './screens/LoginScreen'
 import AppNavigator from './navigation/AppNavigator'
+import { LanguageProvider } from './lib/LanguageContext'
 
 export default function App() {
   const [session, setSession] = useState(null)
@@ -18,7 +19,17 @@ export default function App() {
     })
   }, [])
 
-  if (loading) return <View style={{flex:1,justifyContent:'center',alignItems:'center'}}><ActivityIndicator size="large" color="#22C55E" /></View>
+  if (loading) return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#22C55E" />
+    </View>
+  )
 
-  return session ? <AppNavigator /> : <LoginScreen />
+  return session ? (
+    <LanguageProvider>
+      <AppNavigator />
+    </LanguageProvider>
+  ) : (
+    <LoginScreen />
+  )
 }

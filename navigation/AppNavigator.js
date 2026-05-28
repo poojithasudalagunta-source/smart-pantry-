@@ -5,6 +5,7 @@ import HomeScreen from '../screens/HomeScreen'
 import AddItemScreen from '../screens/AddItemScreen'
 import RecipesScreen from '../screens/RecipesScreen'
 import ShoppingScreen from '../screens/ShoppingScreen'
+import HouseholdScreen from '../screens/HouseholdScreen'
 
 const Tab = createBottomTabNavigator()
 
@@ -16,6 +17,7 @@ export default function AppNavigator() {
         <Tab.Screen name="Add" component={AddItemScreen} options={{ tabBarIcon: () => <Text>➕</Text> }} />
         <Tab.Screen name="Recipes" component={RecipesScreen} options={{ tabBarIcon: () => <Text>🍳</Text> }} />
         <Tab.Screen name="Shopping" component={ShoppingScreen} options={{ tabBarIcon: () => <Text>🛒</Text> }} />
+        <Tab.Screen name="Household" component={HouseholdScreen} options={{ tabBarIcon: () => <Text>👨‍👩‍👧</Text> }} />
       </Tab.Navigator>
     </NavigationContainer>
   )

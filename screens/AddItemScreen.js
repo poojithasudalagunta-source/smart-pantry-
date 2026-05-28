@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
-import { Camera } from 'expo-camera'
+import { useState } from 'react'
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
 import { supabase } from '../lib/supabase'
+import { useLanguage } from '../lib/LanguageContext'
 
-const CATEGORIES = ['🥦 Vegetables', '🍎 Fruits', '🥛 Dairy', '🥩 Meat', '🌾 Grains', '🥫 Canned', '🧃 Drinks', '🍫 Snacks', '🧴 Other']
+const CATEGORIES_EN = ['🥦 Vegetables', '🍎 Fruits', '🥛 Dairy', '🥩 Meat', '🌾 Grains', '🥫 Canned', '🧃 Drinks', '🍫 Snacks', '🧴 Other']
+const CATEGORIES_TE = ['🥦 కూరగాయలు', '🍎 పండ్లు', '🥛 పాల ఉత్పత్తులు', '🥩 మాంసం', '🌾 ధాన్యాలు', '🥫 డబ్బాలు', '🧃 పానీయాలు', '🍫 స్నాక్స్', '🧴 ఇతరాలు']
 
 export default function AddItemScreen() {
   const [name, setName] = useState('')
@@ -12,51 +13,39 @@ export default function AddItemScreen() {
   const [category, setCategory] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
   const [loading, setLoading] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [fetchingProduct, setFetchingProduct] = useState(false)
- const [permission, setPermission] = useState(null)
+  const { t, language } = useLanguage()
 
-  const handleBarcodeScan = async ({ data }) => {
-    setScanning(false)
-    setFetchingProduct(true)
-    try {
-      const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}.json`)
-      const json = await res.json()
-      if (json.status === 1) {
-        const product = json.product
-        setName(product.product_name || product.abbreviated_product_name || '')
-        setCategory(product.categories_tags?.[0]?.replace('en:', '') || '')
-        alert(`✅ Found: ${product.product_name}`)
-      } else {
-        alert('Product not found in database. Please enter manually.')
-      }
-    } catch (e) {
-      alert('Failed to fetch product info.')
-    }
-    setFetchingProduct(false)
+  const CATEGORIES = language === 'te' ? CATEGORIES_TE : CATEGORIES_EN
+
+  const handleScanPress = () => {
+    alert(language === 'te' ? '📷 బార్కోడ్ స్కానింగ్ త్వరలో వస్తుంది!' : '📷 Barcode scanning coming soon on mobile!')
   }
 
-  const handleScanPress = async () => {
-  const { status } = await Camera.requestCameraPermissionsAsync()
-  if (status !== 'granted') return alert('Camera permission is required to scan barcodes.')
-  setScanning(true)
-}
-
   const handleAdd = async () => {
-    if (!name.trim()) return alert('Please enter item name')
+    if (!name.trim()) return alert(language === 'te' ? 'దయచేసి వస్తువు పేరు నమోదు చేయండి' : 'Please enter item name')
     setLoading(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+
+    const { data: memberRows } = await supabase
+      .from('household_members')
+      .select('household_id')
+      .eq('user_id', session.user.id)
+
+    const householdId = memberRows?.[0]?.household_id || null
+
     const { error } = await supabase.from('pantry_items').insert({
-      user_id: user.id,
+      user_id: session.user.id,
+      household_id: householdId,
       name: name.trim(),
       quantity: parseInt(quantity) || 1,
       unit,
       category,
       expiry_date: expiryDate || null
     })
+
     if (error) alert(error.message)
     else {
-      alert('Item added! ✅')
+      alert(language === 'te' ? 'వస్తువు జోడించబడింది! ✅' : 'Item added! ✅')
       setName('')
       setQuantity('1')
       setUnit('pcs')
@@ -66,48 +55,48 @@ export default function AddItemScreen() {
     setLoading(false)
   }
 
-  if (scanning) {
-    return (
-      <View style={styles.scanContainer}>
-        <CameraView
-          style={styles.camera}
-          onBarcodeScanned={handleBarcodeScan}
-          barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'qr'] }}
-        />
-        <View style={styles.scanOverlay}>
-          <View style={styles.scanFrame} />
-          <Text style={styles.scanText}>Point camera at barcode</Text>
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => setScanning(false)}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    )
-  }
-
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.header}>➕ Add Item</Text>
+      <Text style={styles.header}>➕ {t.addItem}</Text>
 
       <TouchableOpacity style={styles.scanBtn} onPress={handleScanPress}>
-        <Text style={styles.scanBtnText}>📷 Scan Barcode</Text>
+        <Text style={styles.scanBtnText}>📷 {t.scanBarcode}</Text>
       </TouchableOpacity>
 
-      {fetchingProduct && <ActivityIndicator color="#22C55E" style={{ marginVertical: 10 }} />}
+      <Text style={styles.label}>{t.itemName} *</Text>
+      <TextInput
+        style={styles.input}
+        placeholder={language === 'te' ? 'ఉదా: టమాటాలు' : 'e.g. Tomatoes'}
+        value={name}
+        onChangeText={setName}
+      />
 
-      <Text style={styles.label}>Item Name *</Text>
-      <TextInput style={styles.input} placeholder="e.g. Tomatoes" value={name} onChangeText={setName} />
-
-      <Text style={styles.label}>Quantity</Text>
+      <Text style={styles.label}>{t.quantity}</Text>
       <View style={styles.row}>
-        <TextInput style={[styles.input, { flex: 1, marginRight: 8 }]} placeholder="1" value={quantity} onChangeText={setQuantity} keyboardType="numeric" />
-        <TextInput style={[styles.input, { flex: 1 }]} placeholder="pcs / kg / L" value={unit} onChangeText={setUnit} />
+        <TextInput
+          style={[styles.input, { flex: 1, marginRight: 8 }]}
+          placeholder="1"
+          value={quantity}
+          onChangeText={setQuantity}
+          keyboardType="numeric"
+        />
+        <TextInput
+          style={[styles.input, { flex: 1 }]}
+          placeholder={language === 'te' ? 'పీస్ / కిలో / లీ' : 'pcs / kg / L'}
+          value={unit}
+          onChangeText={setUnit}
+        />
       </View>
 
-      <Text style={styles.label}>Expiry Date (YYYY-MM-DD)</Text>
-      <TextInput style={styles.input} placeholder="e.g. 2026-06-15" value={expiryDate} onChangeText={setExpiryDate} />
+      <Text style={styles.label}>{t.expiryDate} (YYYY-MM-DD)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder={language === 'te' ? 'ఉదా: 2026-06-15' : 'e.g. 2026-06-15'}
+        value={expiryDate}
+        onChangeText={setExpiryDate}
+      />
 
-      <Text style={styles.label}>Category</Text>
+      <Text style={styles.label}>{t.category}</Text>
       <View style={styles.categoryGrid}>
         {CATEGORIES.map(cat => (
           <TouchableOpacity
@@ -121,7 +110,11 @@ export default function AddItemScreen() {
       </View>
 
       <TouchableOpacity style={styles.button} onPress={handleAdd} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Adding...' : 'Add to Pantry'}</Text>
+        <Text style={styles.buttonText}>
+          {loading
+            ? (language === 'te' ? 'జోడిస్తోంది...' : 'Adding...')
+            : t.addToPantryBtn}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   )
@@ -141,12 +134,5 @@ const styles = StyleSheet.create({
   catText: { fontSize: 13, color: '#374151' },
   catTextActive: { color: '#fff' },
   button: { backgroundColor: '#22C55E', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 24, marginBottom: 40 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  scanContainer: { flex: 1 },
-  camera: { flex: 1 },
-  scanOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
-  scanFrame: { width: 250, height: 250, borderWidth: 2, borderColor: '#22C55E', borderRadius: 12, backgroundColor: 'transparent' },
-  scanText: { color: '#fff', fontSize: 16, marginTop: 20, fontWeight: '600' },
-  cancelBtn: { marginTop: 20, backgroundColor: '#EF4444', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
-  cancelText: { color: '#fff', fontSize: 16, fontWeight: '600' }
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' }
 })
