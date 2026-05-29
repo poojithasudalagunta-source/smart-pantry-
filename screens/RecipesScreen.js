@@ -48,8 +48,13 @@ export default function RecipesScreen() {
       query = query.eq('user_id', session.user.id)
     }
 
-    const { data } = await query
-    setPantryItems(data || [])
+    const { data, error } = await query
+
+console.log('RECIPE QUERY ERROR:', error)
+console.log('RECIPE QUERY DATA:', data)
+console.log('MEMBER ROWS:', memberRows)
+
+setPantryItems(data || [])
   }
 
   const getRecipes = async () => {
