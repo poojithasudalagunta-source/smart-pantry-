@@ -11,6 +11,12 @@ import {
 import { supabase } from '../lib/supabase'
 import { useLanguage } from '../lib/LanguageContext'
 
+import {
+  getPriorityItems,
+  
+} from '../services/recommendationService'
+
+
 export default function RecipesScreen() {
   const [recipes, setRecipes] = useState([])
   const [loading, setLoading] = useState(false)
@@ -37,7 +43,7 @@ export default function RecipesScreen() {
 
     let query = supabase
       .from('pantry_items')
-      .select('name, quantity, unit')
+      .select('name, quantity, unit, expiry_date')
 
     if (memberRows && memberRows.length > 0) {
       query = query.eq(
@@ -70,13 +76,19 @@ setPantryItems(data || [])
     setRecipes([])
 
     try {
-      const itemsList = pantryItems
-        .map(
-          i =>
-            `${i.name} (${i.quantity} ${
-              i.unit || 'pcs'
-            })`
-        )
+      const priorityItems =
+  getPriorityItems(pantryItems)
+
+const priorityNames =
+  priorityItems
+    .slice(0, 5)
+    .map(item => item.name)
+
+const itemsList =
+  priorityNames.length > 0
+    ? priorityNames.join(', ')
+    : pantryItems
+        .map(i => i.name)
         .join(', ')
 
       const prompt =
@@ -99,9 +111,13 @@ setPantryItems(data || [])
 ]
 
 Extra text ఇవ్వకండి.`
-          : `I have these ingredients: ${itemsList}.
+          : `These ingredients are expiring soon:
 
-Suggest 3 simple recipes I can make.
+${itemsList}
+
+Suggest 3 recipes that help reduce food waste.
+
+Prioritize recipes that use these ingredients first.
 
 Return ONLY JSON in this format:
 
@@ -213,7 +229,47 @@ No extra text.`
 
     setLoading(false)
   }
+  const addMissingToShoppingList = async (
+  missingIngredients
+) => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
 
+    if (!session) return
+
+    const { data: memberRows } = await supabase
+      .from('household_members')
+      .select('household_id')
+      .eq('user_id', session.user.id)
+
+    const householdId =
+      memberRows?.[0]?.household_id || null
+
+    const rows = missingIngredients.map(
+      ingredient => ({
+        user_id: session.user.id,
+        household_id: householdId,
+        name: ingredient,
+        bought: false,
+      })
+    )
+
+    const { error } = await supabase
+      .from('shopping_list')
+      .insert(rows)
+
+    if (!error) {
+      alert(
+        `✅ Added ${missingIngredients.length} items to Shopping List`
+      )
+    }
+  } catch (e) {
+    console.log(e)
+    alert('Failed to add items')
+  }
+}
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.header}>
@@ -222,10 +278,31 @@ No extra text.`
 
       <Text style={styles.subtitle}>
         {pantryItems.length}{' '}
+        
         {language === 'te'
           ? 'వస్తువులు మీ పాంట్రీలో ఉన్నాయి'
           : 'items in your pantry'}
       </Text>
+
+      {pantryItems.length > 0 && (
+  <View
+    style={{
+      backgroundColor: '#FEF3C7',
+      padding: 12,
+      borderRadius: 10,
+      marginBottom: 12,
+    }}
+  >
+    <Text style={{ fontWeight: '600' }}>
+      ⚠ Waste Reduction Mode
+    </Text>
+
+    <Text>
+      Recipes are prioritized using ingredients
+      that expire soon.
+    </Text>
+  </View>
+)}
 
       <TouchableOpacity
         style={styles.button}
@@ -300,7 +377,33 @@ No extra text.`
                         🛒 {ing}
                       </Text>
                     )
-                  )}
+                  )
+                  
+                  }
+                  <TouchableOpacity
+  style={{
+    backgroundColor: '#22C55E',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  }}
+  onPress={() =>
+    addMissingToShoppingList(
+      recipe.missing
+    )
+  }
+>
+  <Text
+    style={{
+      color: '#fff',
+      fontWeight: '600',
+      textAlign: 'center',
+    }}
+  >
+    🛒 Add Missing Ingredients
+  </Text>
+</TouchableOpacity>
+
                 </>
               )}
 

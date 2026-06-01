@@ -176,10 +176,24 @@ ${extractedText}
         data: { session },
       } = await supabase.auth.getSession()
 
-      const { data: memberRows } = await supabase
-        .from('household_members')
-        .select('household_id')
-        .eq('user_id', session.user.id)
+      if (!session) {
+  alert('Please login again')
+  return
+}
+
+      const { error } = await supabase
+  .from('pantry_items')
+  .insert({
+    user_id: session.user.id,
+    household_id: householdId,
+    name: item.name,
+    quantity: item.quantity || 1,
+    unit: item.unit || 'pcs',
+    expiry_date: expiryDate,
+    category: item.category || 'General',
+  })
+
+console.log('INSERT ERROR:', error)
 
       const householdId =
         memberRows?.[0]?.household_id || null

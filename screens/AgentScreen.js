@@ -7,14 +7,20 @@ import {
   getExpiredItems,
   calculateWasteRisk,
   createWastePlan,
+  
 } from '../services/tools'
-
+import {
+  getPriorityItems,
+  getPriorityIngredientNames,
+} from '../services/recommendationService'
 
 export default function AgentScreen() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [pantryItems, setPantryItems] = useState([])
+  const [mealMissingItems, setMealMissingItems] =
+  useState([])
   const [expiringItems, setExpiringItems] = useState([])
   const flatListRef = useRef(null)
   const { language } = useLanguage()
@@ -26,6 +32,7 @@ export default function AgentScreen() {
   const fetchPantryData = async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
+    
 
     const { data: memberRows } = await supabase
       .from('household_members')
@@ -42,6 +49,12 @@ export default function AgentScreen() {
 
     const { data } = await query
     const items = data || []
+    setPantryItems(items)
+
+console.log(
+  'Priority Items:',
+  getPriorityItems(items)
+)
     const wastePlan = createWastePlan(items)
     
 
@@ -64,7 +77,7 @@ Generate recipes using these ingredients today.`,
     },
   ])
 }
-    setPantryItems(items)
+    
 
     const expiring = items.filter(item => {
       if (!item.expiry_date) return false
@@ -212,6 +225,162 @@ ${actionText}`
   setLoading(false)
   return
 }
+if (
+  lowerInput.includes('meal plan') ||
+  lowerInput.includes('plan my meals') ||
+  lowerInput.includes('plan meals') ||
+  currentInput.includes('భోజన')
+) {
+
+  const expiring = getExpiringItems(pantryItems)
+
+  const priorityItems =
+    expiring.length > 0
+      ? expiring
+      : pantryItems.slice(0, 5)
+
+  const ingredients = priorityItems
+    .map(item => item.name)
+    .join(', ')
+
+  const planningPrompt = `
+You are Ammamma AI.
+
+Goal:
+Reduce food waste.
+
+Available pantry ingredients:
+${ingredients}
+Today's objective:
+Reduce food waste while creating realistic household meals.
+Create a JSON response only.
+
+Format:
+
+{
+  "breakfast": "",
+  "lunch": "",
+  "dinner": "",
+  "reason": "",
+  "missingIngredients": []
+}
+
+Rules:
+
+Breakfast:
+- Light morning meal
+- Toast, sandwich, omelette, coffee, tea, milk-based drinks
+- Prefer dairy, bread, eggs, fruits and beverages
+- Do not use seafood as the primary breakfast ingredient
+- Avoid biryani, heavy curries, seafood-heavy meals
+
+Lunch:
+- Main meal
+- Rice, curry, wraps, protein dishes are allowed
+
+Dinner:
+- Main meal
+- Slightly lighter than lunch when possible
+
+General:
+- Prioritize ingredients expiring soon
+- Suggest practical Indian home-cooked meals
+- Avoid unrealistic combinations
+- Include only ingredients NOT already available
+- missingIngredients must be an array
+- Return valid JSON only
+
+
+${language === 'te'
+  ? 'Use Telugu values.'
+  : 'Use English values.'}
+`
+
+  const response = await fetch(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization:
+          `Bearer ${process.env.EXPO_PUBLIC_GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          {
+            role: 'system',
+            content: planningPrompt,
+          },
+        ],
+        max_tokens: 500,
+      }),
+    }
+  )
+
+  const data = await response.json()
+
+  const aiResponse =
+  data.choices?.[0]?.message?.content || ''
+console.log('AI RESPONSE:', aiResponse)
+let mealData
+
+try {
+  const cleanResponse = aiResponse
+    .replace(/```json/g, '')
+    .replace(/```/g, '')
+    .trim()
+
+  mealData = JSON.parse(cleanResponse)
+} catch (e) {
+  console.log('JSON PARSE ERROR:', e)
+  mealData = null
+}
+
+if (!mealData) {
+  setMessages(prev => [
+    ...prev,
+    {
+      id: Date.now().toString(),
+      role: 'agent',
+      text: 'Unable to generate meal plan.'
+    }
+  ])
+
+  setLoading(false)
+  return
+}
+setMealMissingItems(
+  mealData.missingIngredients || []
+)
+ setMessages(prev => [
+  ...prev,
+  {
+    id: Date.now().toString(),
+    role: 'agent',
+    text: `👵 Ammamma's Meal Plan
+
+🥣 Breakfast:
+${mealData.breakfast}
+
+🍛 Lunch:
+${mealData.lunch}
+
+🌙 Dinner:
+${mealData.dinner}
+
+💡 Reason:
+${mealData.reason}
+
+🛒 Missing Ingredients:
+${mealData.missingIngredients?.join(', ') || 'Nothing needed'}
+`,
+  },
+])
+
+  setLoading(false)
+  return
+}
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -252,16 +421,18 @@ ${actionText}`
   }
 
   const quickActions = language === 'te' ? [
-    'గడువు మించే వస్తువులు చూపించు',
-    'వంటకాలు సూచించు',
-    'షాపింగ్ లిస్ట్ తయారు చేయి',
-    'ఆహారం వృధా తగ్గించే చిట్కాలు',
-  ] : [
-    "What's expiring soon?",
-    'Suggest recipes for today',
-    'Generate my shopping list',
-    'How to reduce food waste?',
-  ]
+  'గడువు మించే వస్తువులు చూపించు',
+  'వంటకాలు సూచించు',
+  'ఈరోజు భోజన ప్రణాళిక తయారు చేయి',
+  'షాపింగ్ లిస్ట్ తయారు చేయి',
+  'ఆహారం వృధా తగ్గించే చిట్కాలు',
+] : [
+  "What's expiring soon?",
+  'Suggest recipes for today',
+  'Plan my meals today',
+  'Generate my shopping list',
+  'How to reduce food waste?',
+]
 
   const renderMessage = ({ item }) => (
     <View style={[
@@ -269,7 +440,7 @@ ${actionText}`
       item.role === 'user' ? styles.userBubble : styles.agentBubble
     ]}>
       {item.role === 'agent' && (
-        <Text style={styles.agentLabel}>🤖 Agent</Text>
+        <Text style={styles.agentLabel}>👵 Ammamma</Text>
       )}
       <Text style={[
         styles.messageText,
@@ -279,21 +450,152 @@ ${actionText}`
       </Text>
     </View>
   )
+const addMissingToShoppingList = async () => {
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
 
+    if (!session) return
+
+    const { data: memberRows } =
+      await supabase
+        .from('household_members')
+        .select('household_id')
+        .eq('user_id', session.user.id)
+
+    const householdId =
+      memberRows?.[0]?.household_id || null
+
+    const rows = mealMissingItems.map(
+      ingredient => ({
+        user_id: session.user.id,
+        household_id: householdId,
+        name: ingredient,
+        bought: false,
+      })
+    )
+
+    const { error } = await supabase
+      .from('shopping_list')
+      .insert(rows)
+
+    if (!error) {
+      alert(
+        `✅ Added ${mealMissingItems.length} items to Shopping List`
+      )
+    }
+  } catch (e) {
+    console.log(e)
+    alert('Failed to add items')
+  }
+}
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>
-          🤖 {language === 'te' ? 'పాంట్రీ అసిస్టెంట్' : 'Pantry Agent'}
-        </Text>
+       <Text style={styles.headerTitle}>
+  👵 Ammamma
+</Text>
         <Text style={styles.headerSubtitle}>
-          {language === 'te' ? 'AI ద్వారా ఆహారం వృధా తగ్గించండి' : 'AI-powered food waste reduction'}
+          Your Kitchen Companion
         </Text>
-      </View>
+        <View
+  style={{
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+  }}
+>
+  <Text
+    style={{
+      color: '#fff',
+      fontSize: 18,
+      fontWeight: '700',
+    }}
+  >
+    {calculateWasteRisk(pantryItems) === 'HIGH'
+      ? '😱 Panic Ammamma'
+      : calculateWasteRisk(pantryItems) ===
+        'MEDIUM'
+      ? '😟 Concerned Ammamma'
+      : '😊 Happy Ammamma'}
+  </Text>
 
+  <Text
+    style={{
+      color: '#D1FAE5',
+      marginTop: 4,
+    }}
+  >
+    {calculateWasteRisk(pantryItems) === 'HIGH'
+      ? 'Too many ingredients need rescue!'
+      : calculateWasteRisk(pantryItems) ===
+        'MEDIUM'
+      ? 'A few ingredients need attention.'
+      : 'Kitchen is under control.'}
+  </Text>
+</View>
+      </View>
+      
+<View style={styles.dashboardContainer}>
+
+  <View style={styles.statCard}>
+    <Text style={styles.statEmoji}>
+      🔥
+    </Text>
+
+    <Text style={styles.statNumber}>
+      {calculateWasteRisk(pantryItems)}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Chaos Level
+    </Text>
+  </View>
+
+  <View style={styles.statCard}>
+    <Text style={styles.statEmoji}>
+      📦
+    </Text>
+
+    <Text style={styles.statNumber}>
+      {pantryItems.length}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Ingredients
+    </Text>
+  </View>
+
+  <View style={styles.statCard}>
+    <Text style={styles.statEmoji}>
+      ⏳
+    </Text>
+
+    <Text style={styles.statNumber}>
+      {expiringItems.length}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Rescue Queue
+    </Text>
+  </View>
+
+</View>
+<View style={styles.missionCard}>
+  <Text style={styles.missionTitle}>
+    🎯 Today's Mission
+  </Text>
+
+  <Text style={styles.missionText}>
+    Rescue {expiringItems.length} ingredients
+    before they become food waste.
+  </Text>
+</View>
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -305,9 +607,9 @@ ${actionText}`
 
       {loading && (
         <View style={styles.typingIndicator}>
-          <ActivityIndicator size="small" color="#22C55E" />
+          <ActivityIndicator size="small" color="#14532D" />
           <Text style={styles.typingText}>
-            {language === 'te' ? 'అసిస్టెంట్ ఆలోచిస్తోంది...' : 'Agent is thinking...'}
+            {language === 'te' ? 'అసిస్టెంట్ ఆలోచిస్తోంది...' : '👵 Ammamma is thinking...'}
           </Text>
         </View>
       )}
@@ -325,7 +627,27 @@ ${actionText}`
           </TouchableOpacity>
         ))}
       </View>
-
+      {mealMissingItems.length > 0 && (
+  <TouchableOpacity
+    style={{
+      backgroundColor: '#22C55E',
+      margin: 12,
+      padding: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+    }}
+    onPress={addMissingToShoppingList}
+  >
+    <Text
+      style={{
+        color: '#fff',
+        fontWeight: '600',
+      }}
+    >
+      🛒 Add Missing Ingredients To Shopping List
+    </Text>
+  </TouchableOpacity>
+)}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -347,6 +669,54 @@ ${actionText}`
 }
 
 const styles = StyleSheet.create({
+  dashboardContainer: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  paddingHorizontal: 12,
+  marginTop: 12,
+},
+
+statCard: {
+  backgroundColor: '#fff',
+  width: '31%',
+  borderRadius: 18,
+  padding: 14,
+  alignItems: 'center',
+  elevation: 2,
+},
+
+statEmoji: {
+  fontSize: 24,
+},
+
+statNumber: {
+  fontSize: 28,
+  fontWeight: '700',
+  marginTop: 6,
+},
+
+statLabel: {
+  fontSize: 11,
+  color: '#6B7280',
+  marginTop: 4,
+},
+
+missionCard: {
+  backgroundColor: '#E8FDF0',
+  margin: 12,
+  borderRadius: 18,
+  padding: 16,
+},
+
+missionTitle: {
+  fontSize: 18,
+  fontWeight: '700',
+},
+
+missionText: {
+  marginTop: 6,
+  color: '#374151',
+},
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   header: { backgroundColor: '#22C55E', padding: 16, paddingTop: 20 },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
@@ -364,6 +734,7 @@ const styles = StyleSheet.create({
   quickActionsRow: { flexDirection: 'row', flexWrap: 'wrap', padding: 8, gap: 6 },
   quickBtn: { backgroundColor: '#E8FDF0', borderWidth: 1, borderColor: '#22C55E', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
   quickBtnText: { fontSize: 12, color: '#22C55E', fontWeight: '500' },
+  
   inputRow: { flexDirection: 'row', padding: 12, gap: 8, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   input: { flex: 1, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, fontSize: 14, maxHeight: 80 },
   sendBtn: { backgroundColor: '#22C55E', borderRadius: 12, width: 48, justifyContent: 'center', alignItems: 'center' },

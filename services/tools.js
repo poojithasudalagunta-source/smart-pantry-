@@ -71,3 +71,17 @@ export const createWastePlan = (items) => {
   }
 }
 
+export const generateShoppingList = (items) => {
+  const shoppingList = []
+
+  items.forEach(item => {
+    const qty = Number(item.quantity)
+
+    if (!isNaN(qty) && qty <= 1) {
+      shoppingList.push(item.name)
+    }
+  })
+
+  return shoppingList
+}
+

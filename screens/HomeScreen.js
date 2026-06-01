@@ -85,6 +85,27 @@ export default function HomeScreen() {
       </View>
     </View>
   )
+  const expiringCount = items.filter(item => {
+  if (!item.expiry_date) return false
+
+  const days = Math.ceil(
+    (new Date(item.expiry_date) - new Date()) /
+      (1000 * 60 * 60 * 24)
+  )
+
+  return days >= 0 && days <= 3
+}).length
+
+const expiredCount = items.filter(item => {
+  if (!item.expiry_date) return false
+
+  const days = Math.ceil(
+    (new Date(item.expiry_date) - new Date()) /
+      (1000 * 60 * 60 * 24)
+  )
+
+  return days < 0
+}).length
 
   return (
     <View style={styles.container}>
@@ -116,6 +137,70 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      <View
+  style={{
+    backgroundColor: '#14532D',
+    padding: 20,
+    borderRadius: 24,
+    marginBottom: 16,
+  }}
+>
+  <Text
+    style={{
+      color: '#fff',
+      fontSize: 26,
+      fontWeight: '700',
+    }}
+  >
+    📦 Pantry Overview
+  </Text>
+
+  <Text
+    style={{
+      color: '#D1FAE5',
+      marginTop: 6,
+    }}
+  >
+    Track food before it becomes waste.
+  </Text>
+</View>
+<View
+  style={{
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  }}
+>
+  <View style={styles.statCard}>
+    <Text style={styles.statValue}>
+      {items.length}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Ingredients
+    </Text>
+  </View>
+
+  <View style={styles.statCard}>
+    <Text style={styles.statValue}>
+      {expiringCount}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Expiring
+    </Text>
+  </View>
+
+  <View style={styles.statCard}>
+    <Text style={styles.statValue}>
+      {expiredCount}
+    </Text>
+
+    <Text style={styles.statLabel}>
+      Expired
+    </Text>
+  </View>
+</View>
       {loading ? (
         <Text style={styles.empty}>{t.loading}</Text>
       ) : items.length === 0 ? (
@@ -133,6 +218,23 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  statCard: {
+  backgroundColor: '#fff',
+  width: '31%',
+  padding: 14,
+  borderRadius: 18,
+  alignItems: 'center',
+},
+
+statValue: {
+  fontSize: 22,
+  fontWeight: '700',
+},
+
+statLabel: {
+  color: '#6B7280',
+  marginTop: 4,
+},
   container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
   header: { fontSize: 24, fontWeight: '700' },
   householdBadge: { fontSize: 12, color: '#22C55E', fontWeight: '500', marginTop: 2 },
