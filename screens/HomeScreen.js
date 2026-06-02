@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native'
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+} from 'react-native'
 import { supabase } from '../lib/supabase'
 import { useLanguage } from '../lib/LanguageContext'
+
 
 export default function HomeScreen() {
   const [items, setItems] = useState([])
@@ -67,7 +75,7 @@ export default function HomeScreen() {
     if (days === 1) return t.expiringTomorrow
     return `${t.expiresIn} ${days} ${language === 'te' ? 'రోజులు' : 'days'}`
   }
-
+  
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <View style={[styles.expiryBar, { backgroundColor: getExpiryColor(item.expiry_date) }]} />
@@ -106,6 +114,23 @@ const expiredCount = items.filter(item => {
 
   return days < 0
 }).length
+console.log('HomeScreen rendering')
+const pantryHealth =
+  items.length === 0
+    ? 100
+    : Math.max(
+        0,
+        Math.round(
+          ((items.length - expiredCount) / items.length) * 100
+        )
+      )
+const hour = new Date().getHours()
+
+let greeting = 'Good Evening'
+
+if (hour < 12) greeting = 'Good Morning'
+else if (hour < 17) greeting = 'Good Afternoon'
+
 
   return (
     <View style={styles.container}>
@@ -137,32 +162,31 @@ const expiredCount = items.filter(item => {
           </TouchableOpacity>
         </View>
       </View>
-      <View
-  style={{
-    backgroundColor: '#14532D',
-    padding: 20,
-    borderRadius: 24,
-    marginBottom: 16,
-  }}
->
-  <Text
-    style={{
-      color: '#fff',
-      fontSize: 26,
-      fontWeight: '700',
-    }}
-  >
-    📦 Pantry Overview
-  </Text>
+<View style={styles.heroCard}>
+  <View style={styles.heroLeft}>
+    <Text style={styles.heroTitle}>
+  👋 {greeting}
+</Text>
 
-  <Text
-    style={{
-      color: '#D1FAE5',
-      marginTop: 6,
-    }}
-  >
-    Track food before it becomes waste.
-  </Text>
+    <Text style={styles.heroSubtitle}>
+      Track food before it becomes waste.
+    </Text>
+
+    <View style={styles.updatedBadge}>
+      <Text style={styles.updatedText}>
+        🕒 Last updated: Just now
+      </Text>
+    </View>
+  </View>
+
+  <View style={styles.heroRight}>
+    
+    <Image
+  source={require('../assets/images/pantry-health.png')}
+  style={styles.healthImage}
+  resizeMode="contain"
+/>
+  </View>
 </View>
 <View
   style={{
@@ -171,36 +195,69 @@ const expiredCount = items.filter(item => {
     marginBottom: 16,
   }}
 >
-  <View style={styles.statCard}>
-    <Text style={styles.statValue}>
-      {items.length}
-    </Text>
+  <View style={[styles.statCard, styles.ingredientsCard]}>
+  <Text style={styles.statIcon}>📦</Text>
 
-    <Text style={styles.statLabel}>
-      Ingredients
-    </Text>
-  </View>
+  <Text style={styles.statValue}>
+    {items.length}
+  </Text>
 
-  <View style={styles.statCard}>
-    <Text style={styles.statValue}>
-      {expiringCount}
-    </Text>
-
-    <Text style={styles.statLabel}>
-      Expiring
-    </Text>
-  </View>
-
-  <View style={styles.statCard}>
-    <Text style={styles.statValue}>
-      {expiredCount}
-    </Text>
-
-    <Text style={styles.statLabel}>
-      Expired
-    </Text>
-  </View>
+  <Text style={styles.statLabel}>
+    Ingredients
+  </Text>
 </View>
+
+  <View style={[styles.statCard, styles.expiringCard]}>
+  <Text style={styles.statIcon}>⏳</Text>
+
+  <Text style={styles.statValue}>
+    {expiringCount}
+  </Text>
+
+  <Text style={styles.statLabel}>
+    Expiring
+  </Text>
+</View>
+<View style={styles.quickActions}>
+  <Text style={styles.quickTitle}>
+    Quick Actions
+  </Text>
+
+  
+</View>
+  <View style={[styles.statCard, styles.expiredCard]}>
+  <Text style={styles.statIcon}>❌</Text>
+
+  <Text style={styles.statValue}>
+    {expiredCount}
+  </Text>
+
+  <Text style={styles.statLabel}>
+    Expired
+  </Text>
+</View>
+</View>
+<View style={styles.quickGrid}>
+    <TouchableOpacity style={styles.actionCard}>
+      <Text style={styles.actionIcon}>➕</Text>
+      <Text style={styles.actionText}>Add Item</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={styles.actionCard}>
+      <Text style={styles.actionIcon}>📷</Text>
+      <Text style={styles.actionText}>Scan Bill</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={styles.actionCard}>
+      <Text style={styles.actionIcon}>🍳</Text>
+      <Text style={styles.actionText}>Recipes</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity style={styles.actionCard}>
+      <Text style={styles.actionIcon}>🛒</Text>
+      <Text style={styles.actionText}>Shopping</Text>
+    </TouchableOpacity>
+  </View>
       {loading ? (
         <Text style={styles.empty}>{t.loading}</Text>
       ) : items.length === 0 ? (
@@ -218,6 +275,61 @@ const expiredCount = items.filter(item => {
 }
 
 const styles = StyleSheet.create({
+  heroCard: {
+  backgroundColor: '#0B7A43',
+  borderRadius: 28,
+  paddingVertical: 10,
+paddingHorizontal: 24,
+  marginBottom: 20,
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+},
+
+heroLeft: {
+  flex: 1,
+},
+
+heroTitle: {
+  color: '#fff',
+  fontSize: 22,
+  fontWeight: '700',
+},
+
+heroSubtitle: {
+  color: '#D1FAE5',
+  marginTop: 10,
+  fontSize: 16,
+},
+
+updatedBadge: {
+  marginTop: 20,
+  backgroundColor: 'rgba(255,255,255,0.15)',
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: 20,
+  alignSelf: 'flex-start',
+},
+
+updatedText: {
+  color: '#fff',
+  fontSize: 13,
+},
+heroRight: {
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+
+groceryImage: {
+  width: 70,
+  height: 70,
+},
+healthImage: {
+  width: 100,
+  height: 100,
+},
+
   statCard: {
   backgroundColor: '#fff',
   width: '31%',
@@ -231,10 +343,28 @@ statValue: {
   fontWeight: '700',
 },
 
+statIcon: {
+  fontSize: 24,
+  marginBottom: 8,
+},
+
 statLabel: {
   color: '#6B7280',
   marginTop: 4,
 },
+
+ingredientsCard: {
+  backgroundColor: '#ECFDF5',
+},
+
+expiringCard: {
+  backgroundColor: '#FFF7ED',
+},
+
+expiredCard: {
+  backgroundColor: '#FEF2F2',
+},
+
   container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
   header: { fontSize: 24, fontWeight: '700' },
   householdBadge: { fontSize: 12, color: '#22C55E', fontWeight: '500', marginTop: 2 },
@@ -255,5 +385,38 @@ statLabel: {
   langBtnActive: { backgroundColor: '#22C55E' },
   langText: { fontSize: 12, fontWeight: '600', color: '#888' },
   langTextActive: { color: '#fff' },
-  logout: { color: '#EF4444', fontSize: 14, fontWeight: '600' }
+  logout: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
+
+  quickActions: {
+  marginBottom: 20,
+},
+
+quickTitle: {
+  fontSize: 22,
+  fontWeight: '700',
+  marginBottom: 12,
+},
+
+quickGrid: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+},
+
+actionCard: {
+  backgroundColor: '#fff',
+  width: '23%',
+  padding: 18,
+  borderRadius: 20,
+  alignItems: 'center',
+},
+
+actionIcon: {
+  fontSize: 28,
+  marginBottom: 8,
+},
+
+actionText: {
+  fontSize: 14,
+  fontWeight: '600',
+}
 })
