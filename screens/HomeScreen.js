@@ -18,9 +18,8 @@ export default function HomeScreen() {
   const { t, language, setLanguage } = useLanguage()
 
   useEffect(() => {
-    fetchItems()
-  }, [])
-
+  fetchItems()
+}, [])
   const fetchItems = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession()
@@ -75,24 +74,76 @@ export default function HomeScreen() {
     if (days === 1) return t.expiringTomorrow
     return `${t.expiresIn} ${days} ${language === 'te' ? 'రోజులు' : 'days'}`
   }
+  const getCategoryEmoji = (category) => {
+  switch ((category || '').toLowerCase()) {
+    case 'dairy':
+      return '🥛'
+
+    case 'beverages':
+      return '🥤'
+
+    case 'vegetables':
+      return '🥦'
+
+    case 'fruits':
+      return '🍎'
+
+    case 'meat':
+      return '🍗'
+
+    default:
+      return '📦'
+  }
+}
   
   const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      <View style={[styles.expiryBar, { backgroundColor: getExpiryColor(item.expiry_date) }]} />
-      <View style={styles.cardContent}>
-        <View style={styles.cardLeft}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemMeta}>{item.quantity} {item.unit || 'pcs'} • {item.category || 'General'}</Text>
-          <Text style={[styles.expiryText, { color: getExpiryColor(item.expiry_date) }]}>
-            {getExpiryText(item.expiry_date)}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={() => deleteItem(item.id)} style={styles.deleteBtn}>
-          <Text style={styles.deleteText}>🗑️</Text>
-        </TouchableOpacity>
+  <View style={styles.card}>
+    <View
+      style={[
+        styles.expiryBar,
+        { backgroundColor: getExpiryColor(item.expiry_date) },
+      ]}
+    />
+
+    <View style={styles.cardContent}>
+      <View style={styles.foodIconContainer}>
+        <Text style={styles.foodIcon}>
+          {getCategoryEmoji(item.category)}
+        </Text>
       </View>
+
+      <View style={styles.cardLeft}>
+        <Text style={styles.itemName}>
+          {item.name}
+        </Text>
+
+        <Text style={styles.itemMeta}>
+          Qty: {item.quantity || 1}
+        </Text>
+
+        <Text style={styles.itemMeta}>
+          {item.category || 'General'}
+        </Text>
+
+        <Text
+          style={[
+            styles.expiryText,
+            { color: getExpiryColor(item.expiry_date) },
+          ]}
+        >
+          {getExpiryText(item.expiry_date)}
+        </Text>
+      </View>
+
+      <TouchableOpacity
+        onPress={() => deleteItem(item.id)}
+        style={styles.deleteBtn}
+      >
+        <Text style={styles.deleteText}>🗑️</Text>
+      </TouchableOpacity>
     </View>
-  )
+  </View>
+)
   const expiringCount = items.filter(item => {
   if (!item.expiry_date) return false
 
@@ -167,10 +218,15 @@ else if (hour < 17) greeting = 'Good Afternoon'
     <Text style={styles.heroTitle}>
   👋 {greeting}
 </Text>
+<Text style={styles.heroSubtitle}>
+  Track food before it becomes waste.
+</Text>
 
-    <Text style={styles.heroSubtitle}>
-      Track food before it becomes waste.
-    </Text>
+<Text style={styles.healthText}>
+  💚 {pantryHealth}% Pantry Health
+</Text>
+    
+    
 
     <View style={styles.updatedBadge}>
       <Text style={styles.updatedText}>
@@ -218,13 +274,7 @@ else if (hour < 17) greeting = 'Good Afternoon'
     Expiring
   </Text>
 </View>
-<View style={styles.quickActions}>
-  <Text style={styles.quickTitle}>
-    Quick Actions
-  </Text>
 
-  
-</View>
   <View style={[styles.statCard, styles.expiredCard]}>
   <Text style={styles.statIcon}>❌</Text>
 
@@ -236,6 +286,11 @@ else if (hour < 17) greeting = 'Good Afternoon'
     Expired
   </Text>
 </View>
+</View>
+<View style={styles.quickActions}>
+  <Text style={styles.quickTitle}>
+    Quick Actions
+  </Text>
 </View>
 <View style={styles.quickGrid}>
     <TouchableOpacity style={styles.actionCard}>
@@ -258,6 +313,17 @@ else if (hour < 17) greeting = 'Good Afternoon'
       <Text style={styles.actionText}>Shopping</Text>
     </TouchableOpacity>
   </View>
+  <View style={styles.sectionHeader}>
+  <Text style={styles.sectionTitle}>
+    Expiring Soon
+  </Text>
+
+  <TouchableOpacity>
+    <Text style={styles.viewAll}>
+      View All →
+    </Text>
+  </TouchableOpacity>
+</View>
       {loading ? (
         <Text style={styles.empty}>{t.loading}</Text>
       ) : items.length === 0 ? (
@@ -278,7 +344,8 @@ const styles = StyleSheet.create({
   heroCard: {
   backgroundColor: '#0B7A43',
   borderRadius: 28,
-  paddingVertical: 10,
+  paddingVertical: 6,
+  minHeight: 120,
 paddingHorizontal: 24,
   marginBottom: 20,
   flexDirection: 'row',
@@ -326,20 +393,21 @@ groceryImage: {
   height: 70,
 },
 healthImage: {
-  width: 100,
-  height: 100,
+  width: 75,
+  height: 75,
 },
 
   statCard: {
   backgroundColor: '#fff',
   width: '31%',
-  padding: 14,
+  paddingVertical: 10,
+  paddingHorizontal: 12,
   borderRadius: 18,
   alignItems: 'center',
 },
 
 statValue: {
-  fontSize: 22,
+  fontSize: 18,
   fontWeight: '700',
 },
 
@@ -368,13 +436,40 @@ expiredCard: {
   container: { flex: 1, backgroundColor: '#F9FAFB', padding: 16 },
   header: { fontSize: 24, fontWeight: '700' },
   householdBadge: { fontSize: 12, color: '#22C55E', fontWeight: '500', marginTop: 2 },
-  card: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 12, flexDirection: 'row', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+ card: {
+  backgroundColor: '#fff',
+  borderRadius: 18,
+  marginBottom: 12,
+  flexDirection: 'row',
+  overflow: 'hidden',
+  borderWidth: 1,
+  borderColor: '#E5E7EB',
+},
   expiryBar: { width: 5 },
-  cardContent: { flex: 1, flexDirection: 'row', padding: 14, alignItems: 'center' },
-  cardLeft: { flex: 1 },
-  itemName: { fontSize: 16, fontWeight: '600', color: '#111' },
-  itemMeta: { fontSize: 13, color: '#888', marginTop: 2 },
-  expiryText: { fontSize: 12, marginTop: 4, fontWeight: '500' },
+  cardContent: {
+  flex: 1,
+  flexDirection: 'row',
+  alignItems: 'center',
+  padding: 14,
+},
+  cardLeft: {
+  flex: 1,
+},
+  itemName: {
+  fontSize: 18,
+  fontWeight: '700',
+  color: '#111827',
+},
+  itemMeta: {
+  fontSize: 13,
+  color: '#6B7280',
+  marginTop: 2,
+},
+  expiryText: {
+  marginTop: 6,
+  fontSize: 13,
+  fontWeight: '600',
+},
   deleteBtn: { padding: 8 },
   deleteText: { fontSize: 18 },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 15 },
@@ -392,7 +487,7 @@ expiredCard: {
 },
 
 quickTitle: {
-  fontSize: 22,
+  fontSize: 18,
   fontWeight: '700',
   marginBottom: 12,
 },
@@ -405,18 +500,56 @@ quickGrid: {
 actionCard: {
   backgroundColor: '#fff',
   width: '23%',
-  padding: 18,
+  paddingVertical: 12,
+  paddingHorizontal: 8,
   borderRadius: 20,
   alignItems: 'center',
 },
 
 actionIcon: {
-  fontSize: 28,
+  fontSize: 22,
   marginBottom: 8,
 },
+
 
 actionText: {
   fontSize: 14,
   fontWeight: '600',
+},
+sectionHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 12,
+  marginTop: 10,
+},
+
+sectionTitle: {
+  fontSize: 18,
+  fontWeight: '700',
+},
+
+viewAll: {
+  color: '#16A34A',
+  fontWeight: '600',
+},
+healthText: {
+  color: '#fff',
+  fontSize: 18,
+  fontWeight: '700',
+  marginTop: 10,
+},
+foodIconContainer: {
+  width: 60,
+  height: 60,
+  borderRadius: 30,
+  backgroundColor: '#F3F4F6',
+  justifyContent: 'center',
+  alignItems: 'center',
+  marginRight: 12,
+},
+
+foodIcon: {
+  fontSize: 28,
 }
 })
