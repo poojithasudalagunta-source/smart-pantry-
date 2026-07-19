@@ -1,63 +1,54 @@
-export const getExpiringItems = (items) => {
-  return items.filter(item => {
-    if (!item.expiry_date) return false
+﻿const MS_PER_DAY = 1000 * 60 * 60 * 24
 
-    const days =
-      Math.ceil(
-        (new Date(item.expiry_date) - new Date())
-        / (1000 * 60 * 60 * 24)
-      )
+const getDaysUntilExpiry = (expiryDate) => {
+  if (!expiryDate) return null
 
-    return days <= 3 && days >= 0
-  })
-}
-export const getExpiredItems = (items) => {
-  return items.filter(item => {
-    if (!item.expiry_date) return false
-
-    const days =
-      Math.ceil(
-        (new Date(item.expiry_date) - new Date())
-        / (1000 * 60 * 60 * 24)
-      )
-
-    return days < 0
-  })
-}
-export const calculateWasteRisk = (items) => {
-  const expiring =
-    getExpiringItems(items)
-
- if (
-  expiring.some(item => {
-    const days = Math.ceil(
-      (new Date(item.expiry_date) - new Date()) /
-      (1000 * 60 * 60 * 24)
-    )
-
-    return days <= 1
-  })
-) {
-  return 'HIGH'
+  return Math.ceil(
+    (new Date(expiryDate) - new Date()) / MS_PER_DAY
+  )
 }
 
-if (expiring.length >= 3)
-  return 'MEDIUM'
+const withExpiryMetadata = (item) => ({
+  ...item,
+  daysUntilExpiry: getDaysUntilExpiry(item.expiry_date),
+})
 
-return 'LOW'
+export const getExpiringItems = (items = []) => {
+  return (Array.isArray(items) ? items : [])
+    .map(withExpiryMetadata)
+    .filter(item => {
+      if (item.daysUntilExpiry === null) return false
+
+      return item.daysUntilExpiry <= 3 && item.daysUntilExpiry >= 0
+    })
 }
 
-export const createWastePlan = (items) => {
-  const expiring = items.filter(item => {
-    if (!item.expiry_date) return false
+export const getExpiredItems = (items = []) => {
+  return (Array.isArray(items) ? items : [])
+    .map(withExpiryMetadata)
+    .filter(item => {
+      if (item.daysUntilExpiry === null) return false
 
-    const days = Math.ceil(
-      (new Date(item.expiry_date) - new Date()) /
-      (1000 * 60 * 60 * 24)
-    )
+      return item.daysUntilExpiry < 0
+    })
+}
 
-    return days <= 3 && days >= 0
-  })
+export const calculateWasteRisk = (items = []) => {
+  const expiring = getExpiringItems(items)
+
+  if (expiring.some(item => item.daysUntilExpiry <= 1)) {
+    return 'HIGH'
+  }
+
+  if (expiring.length >= 3) {
+    return 'MEDIUM'
+  }
+
+  return 'LOW'
+}
+
+export const createWastePlan = (items = []) => {
+  const expiring = getExpiringItems(items)
 
   return {
     risk:
@@ -71,10 +62,10 @@ export const createWastePlan = (items) => {
   }
 }
 
-export const generateShoppingList = (items) => {
+export const generateShoppingList = (items = []) => {
   const shoppingList = []
 
-  items.forEach(item => {
+  ;(Array.isArray(items) ? items : []).forEach(item => {
     const qty = Number(item.quantity)
 
     if (!isNaN(qty) && qty <= 1) {
@@ -84,4 +75,3 @@ export const generateShoppingList = (items) => {
 
   return shoppingList
 }
-

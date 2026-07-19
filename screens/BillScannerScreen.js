@@ -34,6 +34,155 @@ export default function BillScannerScreen() {
     }
   }
 
+  const stripCodeFences = text =>
+    String(text || '')
+      .replace(/^```json\s*/i, '')
+      .replace(/^```/i, '')
+      .replace(/```$/i, '')
+      .trim()
+
+  const parseRecoveredItems = text => {
+    const clean = stripCodeFences(text)
+    const start = clean.indexOf('[')
+    const end = clean.lastIndexOf(']')
+
+    if (start === -1 || end === -1 || end < start) {
+      return { items: [], truncated: true }
+    }
+
+    const body = clean.slice(start + 1, end)
+    const recovered = []
+    let index = 0
+    let truncated = false
+
+    while (index < body.length) {
+      while (index < body.length && /[\s,]/.test(body[index])) {
+        index += 1
+      }
+
+      const objectStart = body.indexOf('{', index)
+      if (objectStart === -1) break
+
+      let depth = 0
+      let inString = false
+      let escaped = false
+      let objectEnd = -1
+
+      for (let i = objectStart; i < body.length; i += 1) {
+        const char = body[i]
+
+        if (escaped) {
+          escaped = false
+          continue
+        }
+
+        if (char === '\\') {
+          escaped = true
+          continue
+        }
+
+        if (char === '"') {
+          inString = !inString
+          continue
+        }
+
+        if (inString) {
+          continue
+        }
+
+        if (char === '{') {
+          depth += 1
+        } else if (char === '}') {
+          depth -= 1
+          if (depth === 0) {
+            objectEnd = i
+            break
+          }
+        }
+      }
+
+      if (objectEnd === -1) {
+        truncated = true
+        break
+      }
+
+      const candidate = body.slice(objectStart, objectEnd + 1)
+
+      try {
+        const parsedObject = JSON.parse(candidate)
+        if (parsedObject && typeof parsedObject === 'object' && !Array.isArray(parsedObject)) {
+          recovered.push(parsedObject)
+          index = objectEnd + 1
+        } else {
+          index = objectEnd + 1
+        }
+      } catch (e) {
+        truncated = true
+        break
+      }
+    }
+
+    return {
+      items: recovered,
+      truncated,
+    }
+  }
+
+  const getExpiryDays = item => {
+    const name = String(item?.name || '').toLowerCase().trim()
+    const category = String(item?.category || '').toLowerCase().trim()
+
+    if (name.includes('milk') || name.includes('curd') || name.includes('yogurt') || name.includes('paneer')) {
+      return 7
+    }
+
+    if (name.includes('bread') || name.includes('bun') || name.includes('toast') || name.includes('bun')) {
+      return 5
+    }
+
+    if (name.includes('egg')) {
+      return 14
+    }
+
+    if (name.includes('banana') || name.includes('apple') || name.includes('orange') || name.includes('grapes') || name.includes('mango')) {
+      return 7
+    }
+
+    if (name.includes('tomato') || name.includes('onion') || name.includes('potato') || name.includes('carrot') || name.includes('cucumber') || name.includes('capsicum')) {
+      return 10
+    }
+
+    if (name.includes('rice') || name.includes('dal') || name.includes('lentil') || name.includes('chana') || name.includes('moong') || name.includes('masoor')) {
+      return 180
+    }
+
+    if (category.includes('dairy')) {
+      return 7
+    }
+
+    if (category.includes('bakery')) {
+      return 5
+    }
+
+    if (category.includes('fruit')) {
+      return 7
+    }
+
+    if (category.includes('vegetable')) {
+      return 10
+    }
+
+    if (category.includes('grain')) {
+      return 180
+    }
+
+    if (category.includes('frozen')) {
+      return 30
+    }
+
+    return 7
+  }
+
   const scanBill = async imageUri => {
     try {
       setLoading(true)
@@ -67,19 +216,20 @@ Rules:
 - Ignore unclear OCR text
 - Ignore random words
 - Ignore non-food products
-
-Only include items if confidence is high.
-
-Return ONLY JSON array.
+- Only include items if confidence is high
+- Return ONLY valid JSON array
+- Do not use code fences
+- Do not include explanations
+- Do not include expiry_days
+- Each item must be a JSON object with exactly these fields: name, quantity, unit, category
 
 Format:
 [
   {
-    "name": "",
+    "name": "milk",
     "quantity": 1,
     "unit": "pcs",
-    "expiry_days": 7,
-    "category": "Vegetables"
+    "category": "Dairy"
   }
 ]
 
@@ -114,7 +264,7 @@ ${extractedText}
                 content: prompt,
               },
             ],
-            max_tokens: 700,
+            max_tokens: 1800,
           }),
         }
       )
@@ -123,41 +273,28 @@ ${extractedText}
 
       const text =
         data.choices?.[0]?.message?.content || ''
+      console.log('OCR LENGTH:', extractedText.length)
+      console.log('AI RESPONSE LENGTH:', text.length)
+      console.log('MAX_TOKENS USED:', 1800)
 
-      const clean = text
-        .replace(/```json/g, '')
-        .replace(/```/g, '')
-        .trim()
+      const parsedResult = parseRecoveredItems(text)
+      const parsedItems = Array.isArray(parsedResult.items) ? parsedResult.items : []
+      const truncatedResponse = parsedResult.truncated
+      console.log('PARSED ITEMS COUNT:', parsedItems.length)
+      console.log('TRUNCATED RESPONSE DETECTED:', truncatedResponse)
 
-      console.log('AI RESPONSE:', clean)
+      const normalizedItems = parsedItems
+        .filter(item => item && typeof item === 'object' && item.name)
+        .map(item => ({
+          ...item,
+          name: String(item.name).trim(),
+          quantity: Number(item.quantity || 1),
+          unit: item.unit || 'pcs',
+          category: item.category || 'General',
+          expiry_days: getExpiryDays(item),
+        }))
 
-      const start = clean.indexOf('[')
-      const end = clean.lastIndexOf(']')
-
-      if (start === -1 || end === -1) {
-        alert('Invalid AI response')
-        setLoading(false)
-        return
-      }
-
-      const jsonString = clean.slice(
-        start,
-        end + 1
-      )
-
-      let parsed = []
-
-      try {
-        parsed = JSON.parse(jsonString)
-      } catch (e) {
-        console.log('JSON ERROR:', e)
-        alert('Failed to parse AI response')
-        setLoading(false)
-        return
-      }
-
-      // Remove duplicates
-      const uniqueItems = parsed.filter(
+      const uniqueItems = normalizedItems.filter(
         (item, index, self) =>
           index ===
           self.findIndex(
@@ -166,6 +303,14 @@ ${extractedText}
               item.name?.toLowerCase()
           )
       )
+
+      console.log('RECOVERED ITEMS COUNT:', uniqueItems.length)
+
+      if (uniqueItems.length === 0) {
+        alert('Invalid AI response')
+        setLoading(false)
+        return
+      }
 
       setItems(uniqueItems)
 
@@ -177,23 +322,14 @@ ${extractedText}
       } = await supabase.auth.getSession()
 
       if (!session) {
-  alert('Please login again')
-  return
-}
+        alert('Please login again')
+        return
+      }
 
-      const { error } = await supabase
-  .from('pantry_items')
-  .insert({
-    user_id: session.user.id,
-    household_id: householdId,
-    name: item.name,
-    quantity: item.quantity || 1,
-    unit: item.unit || 'pcs',
-    expiry_date: expiryDate,
-    category: item.category || 'General',
-  })
-
-console.log('INSERT ERROR:', error)
+      const { data: memberRows } = await supabase
+        .from('household_members')
+        .select('household_id')
+        .eq('user_id', session.user.id)
 
       const householdId =
         memberRows?.[0]?.household_id || null

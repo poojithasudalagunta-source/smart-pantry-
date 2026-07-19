@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native'
 import { supabase } from '../lib/supabase'
 import { useLanguage } from '../lib/LanguageContext'
 import {
-  getExpiringItems,
   getExpiredItems,
   calculateWasteRisk,
   createWastePlan,
@@ -11,10 +10,18 @@ import {
 } from '../services/tools'
 import {
   getPriorityItems,
-  getPriorityIngredientNames,
 } from '../services/recommendationService'
 
+import { createPlan } from "../services/agent/plannerService";
+import { executePlan } from "../services/agent/toolExecutor";
+import { buildContext } from "../services/agent/contextBuilder";
+import { requestGroqChat } from '../services/agent/groqClient'
+import { AGENT_INTENTS } from '../services/agent/intentConstants'
+import { generateExpiryResponse } from '../services/expiryService'
+import { generateMealPlanResponse } from '../services/mealPlannerService'
+import { generateShoppingListResponse } from '../services/shoppingService'
 export default function AgentScreen() {
+  const DEBUG_AGENT = __DEV__
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -79,11 +86,7 @@ Generate recipes using these ingredients today.`,
 }
     
 
-    const expiring = items.filter(item => {
-      if (!item.expiry_date) return false
-      const days = Math.ceil((new Date(item.expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
-      return days <= 3 && days >= 0
-    })
+    const expiring = wastePlan.expiringItems
     setExpiringItems(expiring)
 
     const greeting = generateGreeting(items, expiring)
@@ -98,11 +101,7 @@ Generate recipes using these ingredients today.`,
   }
 
   const generateGreeting = (items, expiring) => {
-    const expired = items.filter(item => {
-      if (!item.expiry_date) return false
-      const days = Math.ceil((new Date(item.expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
-      return days < 0
-    })
+    const expired = getExpiredItems(items)
 
     if (language === 'te') {
       let msg = `నమస్కారం! 👋 నేను మీ స్మార్ట్ పాంట్రీ అసిస్టెంట్.\n\n`
@@ -121,45 +120,98 @@ Generate recipes using these ingredients today.`,
     }
   }
 
-  const buildSystemPrompt = () => {
-    const itemsList = pantryItems.map(i => {
-      const days = i.expiry_date
-        ? Math.ceil((new Date(i.expiry_date) - new Date()) / (1000 * 60 * 60 * 24))
-        : null
-      return `${i.name} (qty: ${i.quantity} ${i.unit || 'pcs'}${days !== null ? `, expires in ${days} days` : ''})`
-    }).join('\n')
+  const buildSystemPrompt = (context) => {
+  return `
+You are Ammamma AI, an intelligent pantry assistant for an Indian household.
 
-    return `You are an intelligent AI Pantry Manager Agent for an Indian household app called SmartPantry.
+========================
+CURRENT CONTEXT
+========================
 
-Your goals are:
-1. Minimize food waste
-2. Save money for the family
-3. Suggest recipes using available ingredients
-4. Alert about expiring items
-5. Generate smart shopping lists
-6. Suggest donating excess food
-7. Learn and adapt to user eating habits
+${context}
 
-Current pantry inventory:
-${itemsList || 'No items in pantry yet'}
+========================
 
-Expiring soon (within 3 days): ${expiringItems.map(i => i.name).join(', ') || 'None'}
+Rules:
+- Be warm and conversational like a family member.
+- Always prioritize ingredients that expire soon.
+- Suggest practical Indian recipes.
+- Help reduce food waste.
+- Generate shopping lists only when needed.
+- Keep responses concise and actionable.
+${language === 'te'
+  ? '- Always respond in Telugu.'
+  : '- Always respond in English.'}
+`;
+}
 
-Guidelines:
-- Be conversational, warm and helpful like a family member
-- Give specific actionable advice
-- For Indian households, suggest Indian recipes
-- Keep responses concise but helpful
-- Always prioritize using items that expire soonest
-- Suggest donation when items are in excess (qty > 5)
-- When suggesting recipes, use items from the pantry
-- When generating shopping list, consider what's already in pantry
-${language === 'te' ? '- Always respond in Telugu language' : '- Respond in English'}`
+  const appendAgentMessage = (text) => {
+    setMessages(prev => [...prev, {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      role: 'agent',
+      text,
+    }])
+  }
+
+  const logAgentFlow = (plan, toolResults, timings = {}) => {
+    console.log('🧠 Planner')
+    console.log('Intent:', plan.intent)
+    console.log('Confidence:', plan.confidence)
+    console.log('Reason:', plan.reason)
+    console.log('Planner:', `${timings.plannerMs || 0} ms`)
+    console.log('------------------------')
+    console.log('🔧 Executor')
+    ;(toolResults.executedTools || []).forEach(tool => {
+      console.log(`✓ ${tool}`, `${toolResults.toolTimings?.[tool] || 0} ms`)
+    })
+    ;(toolResults.failedTools || []).forEach(tool => {
+      console.log(`✗ ${tool}`)
+    })
+    console.log('Executor:', `${timings.executorMs || toolResults.durationMs || 0} ms`)
+    console.log('------------------------')
+    console.log('📦 Context')
+    console.log('Pantry Items:', (toolResults.pantryItems || []).length)
+    console.log('Expiring:', (toolResults.expiringItems || []).length)
+    console.log('Recipes:', Array.isArray(toolResults.recipes) ? toolResults.recipes.length : toolResults.recipes ? 1 : 0)
+    if (timings.featureMs !== undefined) console.log('Feature Service:', `${timings.featureMs} ms`)
+    if (timings.groqMs !== undefined) console.log('Groq:', `${timings.groqMs} ms`)
+    if (timings.totalMs !== undefined) console.log('Total:', `${timings.totalMs} ms`)
+    console.log('------------------------')
+  }
+
+  const runFeature = async (operation, timings) => {
+    const featureStartedAt = Date.now()
+    const result = await Promise.resolve(operation())
+    timings.featureMs = Date.now() - featureStartedAt
+    return result
+  }
+
+  const completeAgentTurn = ({
+    startedAt,
+    plan,
+    toolResults,
+    timings,
+    context,
+    reply,
+  }) => {
+    timings.totalMs = Date.now() - startedAt
+
+    if (!DEBUG_AGENT) {
+      appendAgentMessage(reply)
+      return
+    }
+
+    logAgentFlow(plan, toolResults, timings)
+    console.log(context)
+    console.log('🤖 Final Response Generated')
+    appendAgentMessage(reply)
   }
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return
 
+    const totalStartedAt = Date.now()
+    const timings = {}
     const userMessage = { id: Date.now().toString(), role: 'user', text: input.trim() }
     setMessages(prev => [...prev, userMessage])
     const currentInput = input.trim()
@@ -171,253 +223,118 @@ ${language === 'te' ? '- Always respond in Telugu language' : '- Respond in Engl
         role: m.role === 'agent' ? 'assistant' : 'user',
         content: m.text
       }))
-      const lowerInput = currentInput.toLowerCase()
 
-if (
-  lowerInput.includes('expiring') ||
-  lowerInput.includes('expiry') ||
-  currentInput.includes('గడువు')
-) {
-  const expiring = getExpiringItems(pantryItems)
+      const plannerStartedAt = Date.now()
+      const plan = await createPlan(currentInput)
+      timings.plannerMs = Date.now() - plannerStartedAt
 
-const risk = calculateWasteRisk(pantryItems)
+      const executorStartedAt = Date.now()
+      const toolResults = await executePlan(plan, {
+        pantryItems,
+      })
+      timings.executorMs = Date.now() - executorStartedAt
 
-const actionText = expiring
-  .map(item => {
-    const days = Math.ceil(
-      (new Date(item.expiry_date) - new Date()) /
-      (1000 * 60 * 60 * 24)
-    )
+      const context = buildContext(toolResults)
 
-    if (days <= 1) {
-      return `• ${item.name}: Use today or tomorrow`
-    }
+      switch (plan.intent) {
+        case AGENT_INTENTS.EXPIRY_CHECK: {
+          const reply = await runFeature(
+            () => generateExpiryResponse(toolResults),
+            timings,
+          )
+          completeAgentTurn({
+            startedAt: totalStartedAt,
+            plan,
+            toolResults,
+            timings,
+            context,
+            reply,
+          })
+          return
+        }
 
-    if (days <= 3) {
-      return `• ${item.name}: Prioritize this week`
-    }
+        case AGENT_INTENTS.MEAL_PLAN: {
+          setMealMissingItems([])
 
-    return `• ${item.name}: Monitor usage`
-  })
-  .join('\n')
+          const mealPlan = await runFeature(
+            () => generateMealPlanResponse(toolResults, language, context),
+            timings,
+          )
+          timings.groqMs = mealPlan.groqDurationMs
 
-const reply =
-  expiring.length === 0
-    ? '✅ No items are expiring soon. Waste risk is LOW.'
-    : `🎯 Goal: Reduce food waste
+          setMealMissingItems(
+            mealPlan.mealData?.missingIngredients || []
+          )
 
-⚠ Waste Risk: ${risk}
+          completeAgentTurn({
+            startedAt: totalStartedAt,
+            plan,
+            toolResults,
+            timings,
+            context,
+            reply: mealPlan.reply,
+          })
+          return
+        }
 
-📦 Expiring Items:
-${expiring.map(i => `• ${i.name}`).join('\n')}
+        case AGENT_INTENTS.SHOPPING_LIST: {
+          const shoppingPlan = await runFeature(
+            () => generateShoppingListResponse(toolResults, language),
+            timings,
+          )
+          completeAgentTurn({
+            startedAt: totalStartedAt,
+            plan,
+            toolResults,
+            timings,
+            context,
+            reply: shoppingPlan.reply,
+          })
+          return
+        }
 
-🚀 Recommended Action:
-${actionText}`
-  setMessages(prev => [
-    ...prev,
-    {
-      id: Date.now().toString(),
-      role: 'agent',
-      text: reply,
-    },
-  ])
+        default: {
+          break
+        }
+      }
 
-  setLoading(false)
-  return
-}
-if (
-  lowerInput.includes('meal plan') ||
-  lowerInput.includes('plan my meals') ||
-  lowerInput.includes('plan meals') ||
-  currentInput.includes('భోజన')
-) {
-
-  const expiring = getExpiringItems(pantryItems)
-
-  const priorityItems =
-    expiring.length > 0
-      ? expiring
-      : pantryItems.slice(0, 5)
-
-  const ingredients = priorityItems
-    .map(item => item.name)
-    .join(', ')
-
-  const planningPrompt = `
-You are Ammamma AI.
-
-Goal:
-Reduce food waste.
-
-Available pantry ingredients:
-${ingredients}
-Today's objective:
-Reduce food waste while creating realistic household meals.
-Create a JSON response only.
-
-Format:
-
-{
-  "breakfast": "",
-  "lunch": "",
-  "dinner": "",
-  "reason": "",
-  "missingIngredients": []
-}
-
-Rules:
-
-Breakfast:
-- Light morning meal
-- Toast, sandwich, omelette, coffee, tea, milk-based drinks
-- Prefer dairy, bread, eggs, fruits and beverages
-- Do not use seafood as the primary breakfast ingredient
-- Avoid biryani, heavy curries, seafood-heavy meals
-
-Lunch:
-- Main meal
-- Rice, curry, wraps, protein dishes are allowed
-
-Dinner:
-- Main meal
-- Slightly lighter than lunch when possible
-
-General:
-- Prioritize ingredients expiring soon
-- Suggest practical Indian home-cooked meals
-- Avoid unrealistic combinations
-- Include only ingredients NOT already available
-- missingIngredients must be an array
-- Return valid JSON only
-
-
-${language === 'te'
-  ? 'Use Telugu values.'
-  : 'Use English values.'}
-`
-
-  const response = await fetch(
-    'https://api.groq.com/openai/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization:
-          `Bearer ${process.env.EXPO_PUBLIC_GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+      const groqResult = await requestGroqChat({
         messages: [
-          {
-            role: 'system',
-            content: planningPrompt,
-          },
+          { role: 'system', content: buildSystemPrompt(context) },
+          ...conversationHistory,
+          { role: 'user', content: currentInput }
         ],
-        max_tokens: 500,
-      }),
-    }
-  )
-
-  const data = await response.json()
-
-  const aiResponse =
-  data.choices?.[0]?.message?.content || ''
-console.log('AI RESPONSE:', aiResponse)
-let mealData
-
-try {
-  const cleanResponse = aiResponse
-    .replace(/```json/g, '')
-    .replace(/```/g, '')
-    .trim()
-
-  mealData = JSON.parse(cleanResponse)
-} catch (e) {
-  console.log('JSON PARSE ERROR:', e)
-  mealData = null
-}
-
-if (!mealData) {
-  setMessages(prev => [
-    ...prev,
-    {
-      id: Date.now().toString(),
-      role: 'agent',
-      text: 'Unable to generate meal plan.'
-    }
-  ])
-
-  setLoading(false)
-  return
-}
-setMealMissingItems(
-  mealData.missingIngredients || []
-)
- setMessages(prev => [
-  ...prev,
-  {
-    id: Date.now().toString(),
-    role: 'agent',
-    text: `👵 Ammamma's Meal Plan
-
-🥣 Breakfast:
-${mealData.breakfast}
-
-🍛 Lunch:
-${mealData.lunch}
-
-🌙 Dinner:
-${mealData.dinner}
-
-💡 Reason:
-${mealData.reason}
-
-🛒 Missing Ingredients:
-${mealData.missingIngredients?.join(', ') || 'Nothing needed'}
-`,
-  },
-])
-
-  setLoading(false)
-  return
-}
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.EXPO_PUBLIC_GROQ_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: buildSystemPrompt() },
-            ...conversationHistory,
-            { role: 'user', content: currentInput }
-          ],
-          max_tokens: 500
-        })
+        maxTokens: 500,
+        fallbackMessage: language === 'te'
+          ? 'క్షమించండి, సేవ తాత్కాలికంగా అందుబాటులో లేదు.'
+          : 'Chat service is temporarily unavailable.',
       })
 
-      const data = await response.json()
-      const agentReply = data.choices?.[0]?.message?.content ||
-        (language === 'te' ? 'క్షమించండి, అర్థం కాలేదు.' : 'Sorry, I could not process that.')
+      timings.groqMs = groqResult.durationMs
 
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        text: agentReply
-      }])
+      const agentReply = groqResult.ok
+        ? groqResult.content
+        : groqResult.message || (language === 'te' ? 'క్షమించండి, అర్థం కాలేదు.' : 'Sorry, I could not process that.')
+
+      completeAgentTurn({
+        startedAt: totalStartedAt,
+        plan,
+        toolResults,
+        timings,
+        context,
+        reply: agentReply,
+      })
     } catch (e) {
+      console.log('Agent Error', e)
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'agent',
         text: language === 'te' ? 'క్షమించండి, ఏదో తప్పు జరిగింది.' : 'Sorry, something went wrong.'
       }])
+    } finally {
+      setLoading(false)
+      setTimeout(() => flatListRef.current?.scrollToEnd(), 100)
     }
-
-    setLoading(false)
-    setTimeout(() => flatListRef.current?.scrollToEnd(), 100)
   }
 
   const quickActions = language === 'te' ? [
@@ -490,6 +407,8 @@ const addMissingToShoppingList = async () => {
     alert('Failed to add items')
   }
 }
+  const wasteRisk = calculateWasteRisk(pantryItems)
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -517,9 +436,9 @@ const addMissingToShoppingList = async () => {
       fontWeight: '700',
     }}
   >
-    {calculateWasteRisk(pantryItems) === 'HIGH'
+    {wasteRisk === 'HIGH'
       ? '😱 Panic Ammamma'
-      : calculateWasteRisk(pantryItems) ===
+      : wasteRisk ===
         'MEDIUM'
       ? '😟 Concerned Ammamma'
       : '😊 Happy Ammamma'}
@@ -531,9 +450,9 @@ const addMissingToShoppingList = async () => {
       marginTop: 4,
     }}
   >
-    {calculateWasteRisk(pantryItems) === 'HIGH'
+    {wasteRisk === 'HIGH'
       ? 'Too many ingredients need rescue!'
-      : calculateWasteRisk(pantryItems) ===
+      : wasteRisk ===
         'MEDIUM'
       ? 'A few ingredients need attention.'
       : 'Kitchen is under control.'}
@@ -549,7 +468,7 @@ const addMissingToShoppingList = async () => {
     </Text>
 
     <Text style={styles.statNumber}>
-      {calculateWasteRisk(pantryItems)}
+      {wasteRisk}
     </Text>
 
     <Text style={styles.statLabel}>
@@ -741,3 +660,14 @@ missionText: {
   sendBtnDisabled: { backgroundColor: '#D1FAE5' },
   sendBtnText: { fontSize: 18 }
 })
+
+
+
+
+
+
+
+
+
+
+
